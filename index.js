@@ -27,7 +27,8 @@ const listener = app.listen(process.env.PORT || 3000, () => {
 let exerciseSessionSchema = new mongoose.Schema({
   description: {type: String, required: true},
   duration: {type: Number, required: true},
-  date: String
+  date: Number,
+  _id: false
 })
 
 let userSchema = new mongoose.Schema({
@@ -38,6 +39,20 @@ let userSchema = new mongoose.Schema({
 // mongoose model
 let Session = mongoose.model('Session', exerciseSessionSchema)
 let User = mongoose.model('User', userSchema)
+
+// date formater
+function dateFormatter(date){
+    const targetDate = new Date(date)
+    const formatterDate  = targetDate.toLocaleDateString('en-US', {
+      weekday: 'short',
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    })
+    const newFormatterDate = formatterDate
+    const newNewFormatterDate = newFormatterDate.replace(/,/g, "")
+    return newNewFormatterDate
+}
 
 // create new user
 app.post('/api/users', async function(request, response) {
@@ -71,12 +86,12 @@ app.post('/api/users/:_id/exercises', async(req, res)=>{
   const newSession = new Session({
     description: req.body.description,
     duration: parseInt(req.body.duration),
-    date: req.body.date
+    date: Date.parse(req.body.date)
   })
 
   // if Date field is empty, add todays date
   if(newSession.date === ''){
-    newSession.date = new Date().toISOString().substring(0,10)
+    newSession.date = Date.now()
   }
 
   // Get Id from index.html
@@ -86,10 +101,11 @@ app.post('/api/users/:_id/exercises', async(req, res)=>{
       {$push : {log: newSession}},
       {new: true},
     )
+  
     let responseObject = {}
     responseObject['_id'] = findByIdAndUpdateUser.id
     responseObject['username'] = findByIdAndUpdateUser.username
-    responseObject['date'] = new Date(newSession.date).toDateString()
+    responseObject['date'] = dateFormatter(newSession.date)
     responseObject['description'] = newSession.description
     responseObject['duration'] = newSession.duration
     res.json(responseObject)
@@ -101,33 +117,40 @@ app.post('/api/users/:_id/exercises', async(req, res)=>{
 // get Logs user
 app.get('/api/users/:id/logs', async(req, res)=>{
   try{
-    const findByIdUser = await User.findById(req.params._id)
+    const findByIdUser = await User.findById(req.params.id)
     if(req.query.from || req.query.to){
-      const fromDate = new Date()
-      const toDate = new Date()
+      let fromDate = 1
+      let toDate = Number.MAX_SAFE_INTEGER
       if(req.query.from){
-        fromDate = new Date(req.query.from)
+        fromDate = Date.parse(req.query.from)
       }
       if(req.query.to){
-        toDate = new Date(req.query.to)
+        toDate = Date.parse(req.query.to)
       }
-
-      fromDate = fromDate.getTime()
-      toDate = toDate.getTime()
-
-      result.log = result.log.filter(session=>{
-        const sessionDate = new Date(session.date).getTime()
-        return sessionDate >= fromDate && sessionDate <= toDate
-      })
+      findByIdUser.log = findByIdUser.log.filter((session) => (session.date >= fromDate && session.date <= toDate))
     }
 
     if(req.query.limit){
-      result.log = result.log.slice(0, req.query.limit)
+      findByIdUser.log = findByIdUser.log.slice(0, req.query.limit)
     }
 
-    result = result.toJSON()
-    result['count'] = result.log.length
-    res.json(result)
+    function generateResponse(data){
+      const formattedData = {
+        _id: data._id,
+        username: data.username,
+        count: data.log.length,
+        log: data.log.map((logEntry) => ({
+          description: logEntry.description,
+          duration: logEntry.duration,
+          date: new Date(logEntry.date).toDateString()
+        }))
+      }
+      return formattedData
+    }
+
+    const responseJson = generateResponse(findByIdUser)
+
+    res.json(responseJson)
   } catch (err){
     res.json({"error": err})
   }
